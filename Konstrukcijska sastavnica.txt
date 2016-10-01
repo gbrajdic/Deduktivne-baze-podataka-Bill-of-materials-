@@ -1,0 +1,593 @@
+﻿/*
+PRKATIČNI DIO DIPLOMSKOG RADA - KONSTRUKCIJSKA SASTAVICA MATERIJALA
+Goran Brajdić
+
+Deduktivna baza podataka koju raliziramo jest tzv. KONSTRUKCIJSKA SASTAVNICA materijala za proizvodnju bicikala (eng. Bill of materials)  
+koja sadrži sklopive dijelove koji se mogu sastojati djelomično od drugih sklopivih poddijelova
+koji se ponovo mogu sastojati od sklopivih poddijelova itd. 
+sve dok se cijeli sastav ne razgradi u elementarne dijelove (koji se moraju nabaviti, primjerice od nekog dobavljača). 
+Iz same formulacije problema možemo uočiti da će se javljati potreba za upitima koji koriste rekurzije. 
+Primjerice, može nas zanimati koliko je elementarnih dijelova potrebno za neki sklopivi dio, 
+ili u koje sve sklopive dijelove direktno ili indirektno ulazi neki sklopivi dio.
+
+Praktični dio dipl. rada (kao i jezik LogiQL) detaljnije su opisani u 3. poglavlju dipl. rada DEDUKTIVNE BAZE PODATAKA.
+
+Ovdje su dani sheme i pravila, te podaci i upiti nad deduktivnom bazom podataka (konstrukcijska sastavnica).
+*/
+
+
+// Shema baze podataka za konstrukcijsku sastavnicu proizvodnje bicikla, zajedno sa pravilima. 
+// Prvo copy-paste u REPL na web adresi https://repl.logicblox.com/?  addblock ' ' dio ispod, pa prtisnuti tipku ENTER.
+
+addblock '
+
+		  Dio(p), dio_ID(p:ID) -> string(ID).	
+		  OsnovniDio(p) -> Dio(p).
+		  SklopiviDio(p)-> Dio(p).
+		  lang:isEntity[`OsnovniDio] = true.
+          lang:isEntity[`SklopiviDio] = true.
+		 
+		  -Dio(x) <- -OsnovniDio(x).
+		  -Dio(x) <- -SklopiviDio(x).
+		  
+		   Dio(p)-> OsnovniDio(p) ; SklopiviDio(p).
+		   SklopiviDio(p) -> !OsnovniDio(p).
+		  
+		  
+		  Dobavljac(d), dobavljac_ID(d:ID) -> string(ID).
+		  dobavljac_naziv[d]=naziv -> Dobavljac(d), string(naziv).
+		  dobavljac_addresa[d]=adresa -> Dobavljac(d), string(adresa).
+		  Dobavljac(d) -> dobavljac_naziv[d]=_.
+		  Dobavljac(d) -> dobavljac_addresa[d]=_.
+		  dobavljac_naziv[d1]=n, dobavljac_naziv[d2]=n, dobavljac_addresa[d1]=a, dobavljac_addresa[d2]=a -> d1=d2.
+		  
+		  Zaposlenik(e), zaposlenik_ID(e:ID) -> string(ID).
+		  zaposlenik_ime[e]=ime -> Zaposlenik(e), string(ime).
+		  zaposlenik_prezime[e]=prezime -> Zaposlenik(e), string(prezime).
+		  zaposlenik_nazivRadnogMjesta[e]=radnoMjesto -> Zaposlenik(e), string(radnoMjesto).
+		  zaposlenik_satnica[e]=satnica -> Zaposlenik(e), decimal(satnica).
+		  Zaposlenik(e)->zaposlenik_ime[e]=_.
+		  Zaposlenik(e)->zaposlenik_prezime[e]=_.
+		  Zaposlenik(e)->zaposlenik_nazivRadnogMjesta[e]=_.
+		  Zaposlenik(e)->zaposlenik_satnica[e]=_.
+		  
+		  OdgovarajuciDio(od), odgDio_ID(od:odID) -> string(odID).
+		  odgovarajuciDio_marka[od]=marka -> OdgovarajuciDio(od), string(marka).
+		  odgovarajuciDio_spec[od]=spec -> OdgovarajuciDio(od), string(spec).
+		  odgovarajuciDio_tezina[od]=tezina -> OdgovarajuciDio(od), int(tezina).
+		  OdgovarajuciDio(od) -> odgovarajuciDio_marka[od]=_.
+		  OdgovarajuciDio(od) -> odgovarajuciDio_spec[od]=_.
+		  OdgovarajuciDio(od) -> odgovarajuciDio_tezina[od]=_.
+		  
+		  odgovarajuciDioKodDobavljaca_cijena[doba,odgDio]=cijena -> Dobavljac(doba), OdgovarajuciDio(odgDio), decimal(cijena).
+		  odgovarajuciDioKodDobavljaca_vrijemeIsporuke[doba,odgDio]=dan -> Dobavljac(doba), OdgovarajuciDio(odgDio), int(dan).
+		  OdgovarajuciDio(od) -> odgovarajuciDioKodDobavljaca_cijena[_,od]=_.
+		  OdgovarajuciDio(od) -> odgovarajuciDioKodDobavljaca_vrijemeIsporuke[_,od]=_.
+		  odgovarajuciDioKodDobavljaca_cijena[d,od]=_ -> odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=_.
+		  odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=_ -> odgovarajuciDioKodDobavljaca_cijena[d,od]=_.
+
+		  odgovarajuciDioZaOsnovniDio(odgDio,osnDio) -> OdgovarajuciDio(odgDio), OsnovniDio(osnDio).
+		  OsnovniDio(o) -> odgovarajuciDioZaOsnovniDio(_,o).
+		  OdgovarajuciDio(od)->odgovarajuciDioZaOsnovniDio(od,_).
+		  
+		  direktnoSadrzi[p1,p2]=kvant -> SklopiviDio(p1), Dio(p2), int(kvant).
+		  SklopiviDio(s) -> direktnoSadrzi[s,_]=_.
+		  
+		  
+		  sklopiviDio_vrijemeSastavljanja[e,p]=vrijeme_u_Satima -> Zaposlenik(e), SklopiviDio(p) ,decimal(vrijeme_u_Satima).
+		  SklopiviDio(s) -> sklopiviDio_vrijemeSastavljanja[_,s]=_.
+		  
+		  sviPoddijelovi[put ,dio, poddio]=direktnoSadrzi[dio, poddio] <- put=dio_ID[dio].
+		  sviPoddijelovi[put, dio, poddio]=kvant<- kvant=sviPoddijelovi[put1, dio, poddio1]*direktnoSadrzi[poddio1, poddio],string(put),put =  put1 +" - "+ dio_ID[poddio1].
+          !sviPoddijelovi[_,dio, dio]=_.
+		  
+		  
+		  sklopiviKojiSadrzeDijelove[dd,pp]=qnt<- agg<<qnt=total(k)>>sviPoddijelovi[_,dd,pp]=k.
+		  
+		  najjeftiniji[osnDio]=cijena<-agg<<cijena=min(cijena1)>> ( odgovarajuciDioZaOsnovniDio(odgDio,osnDio), odgovarajuciDioKodDobavljaca_cijena[_,odgDio]=cijena1).
+		  
+		  najjeftinijiOsnDijeloviNekogDijela[dio,dob,osnDio,odgDio]=cijena <- sviPoddijelovi[_,dio,osnDio]=_,cijena=najjeftiniji[osnDio], odgovarajuciDioZaOsnovniDio(odgDio,osnDio) ,cijena=odgovarajuciDioKodDobavljaca_cijena[dob,odgDio].
+		  
+		  najjeftinijiOsnCijeneSastavaKumul[put,dio,osnDio]=cijena <- jedinicnaCijena=najjeftinijiOsnDijeloviNekogDijela[dio,_,osnDio,_],kvant=sviPoddijelovi[put,dio,osnDio],kvantDecimal=int:decimal:convert[kvant],cijena=jedinicnaCijena*kvantDecimal.
+		  
+		  najjeftOsnCijeneSastavaKumulGrupirano[part,bparts]=price <- agg<<price=total(p)>>najjeftinijiOsnCijeneSastavaKumul[_,part,bparts]=p.
+		  
+		  cijenaSastavljanja[zaposlenikID,dio]=sklopiviDio_vrijemeSastavljanja[zaposlenikID,dio]*zaposlenik_satnica[zaposlenikID].
+		  
+		  cijenaSastavljanjaGrupirano[dio]=cijena <- agg<<cijena=total(c)>> c=cijenaSastavljanja[_,dio].
+		  
+		  cijenaSastavljanjaSaNajjeftDijelovima[put, dio, dijelovi]=cijene <- najjeftinijiOsnCijeneSastavaKumul[put,dio,dijelovi]=cijene.
+		  cijenaSastavljanjaSaNajjeftDijelovima[put, dio, dijelovi]=cijene <- kvant=sviPoddijelovi[put,dio,dijelovi],SklopiviDio(dijelovi), cijena=cijenaSastavljanjaGrupirano[dijelovi],kvant1=int:decimal:convert[kvant],cijene=kvant1*cijena.
+		  
+		  grupCijenaSastavljanjaSaNajjeftDijelovima[dio]=cijena<-agg<<cijena=total(cijene)>> cijene=cijenaSastavljanjaSaNajjeftDijelovima[_, dio,_].
+		  
+		  cijenaProizvodnje[dio]=cijena<-c1=grupCijenaSastavljanjaSaNajjeftDijelovima[dio], c2=cijenaSastavljanjaGrupirano[dio],cijena=c1+c2.
+		  
+		  
+		  kolikoNaruciti[put,dio,osnDio,d,odgDio]=kvant <- _=najjeftinijiOsnDijeloviNekogDijela[dio,d,osnDio,odgDio],kvant=sviPoddijelovi[put,dio,osnDio].
+			
+		  kolikoNarucitiSkupa[dio,osnDio,d,odgDio]=kvant1 <- agg<<kvant1 = total(kvant)>> kolikoNaruciti[_,dio,osnDio,d,odgDio]=kvant.
+		  
+		  najranije_djeloviSMogucimDuplikatima[dio,dob,osnDio,odgDio]=dan <-najjeftinijiOsnDijeloviNekogDijela[dio,dob,osnDio,odgDio]=_, odgovarajuciDioKodDobavljaca_vrijemeIsporuke[dob,odgDio]=dan.
+		  najranije_djeloviSMogucimDuplikatimaGrupirano[dio,osnDio]=dangrupe <- agg<<dangrupe=min(dan)>> najranije_djeloviSMogucimDuplikatima[dio,_,osnDio,_]=dan.
+		  
+		  vrijemeDoPocetkaProizvodnje[dio]=dani <- agg<<dani=max(dangrupe)>>najranije_djeloviSMogucimDuplikatimaGrupirano[dio,_]=dangrupe.
+		  
+		  naziviDobavljaca(i)-> string(i).
+		  naziviDobavljaca(i)<- dobavljac_naziv[_]=i.
+		  
+		  rangiraniNaziviDobavljacaUzlazno[i] = nazivi -> int(i), string(nazivi).
+		  rangiraniNaziviDobavljacaUzlazno[i] = nazivi <- seq << i= nazivi >> naziviDobavljaca(nazivi).
+		  
+		  brojDobavljaca[]=n -> int(n).
+		  brojDobavljaca[]=n <- agg << n=count() >> rangiraniNaziviDobavljacaUzlazno[_] = _.
+		  
+		  rangiraniNaziviDobavljacaSilazno[i]=nazivi -> int(i), string(nazivi).
+		  rangiraniNaziviDobavljacaSilazno[i]=nazivi <- brojDobavljaca[]=n, rangiraniNaziviDobavljacaUzlazno[j] = nazivi, i=(n-1)-j.
+		  '
+		  
+
+//Dodavanje podataka u bazu (punjenje baze podataka) delta pravilima
+// Nakon što smo dodali sa addblock sheme i pravila , tada u isti REPL dodajemo podatke. Copy-paste exec ' ' dio ispod, pa pritisnuti tipku ENTER.  		  
+
+exec '
+		  
++OsnovniDio(p), +dio_ID[p]="Sajla_WF".
++OsnovniDio(p), +dio_ID[p]="Sjedalo_WF".
++OsnovniDio(p), +dio_ID[p]="Kocnica_WF".
++OsnovniDio(p), +dio_ID[p]="Maska_lanca".
++OsnovniDio(p), +dio_ID[p]="Pedale_WF".
++OsnovniDio(p), +dio_ID[p]="Kurbla_WF".
++OsnovniDio(p), +dio_ID[p]="Prednji_lancanik_WF".
++OsnovniDio(p), +dio_ID[p]="Lanac_WF".
++OsnovniDio(p), +dio_ID[p]="Kazeta_WF".
++OsnovniDio(p), +dio_ID[p]="Blatobran".
++OsnovniDio(p), +dio_ID[p]="Lula_volana_WF".
++OsnovniDio(p), +dio_ID[p]="Zracnica_WF".
++OsnovniDio(p), +dio_ID[p]="Guma_WF".
++OsnovniDio(p), +dio_ID[p]="Ventil_WF".
++OsnovniDio(p), +dio_ID[p]="Alum_cijev_10_WF".
++OsnovniDio(p), +dio_ID[p]="Alum_cijev_25_WF".
++OsnovniDio(p), +dio_ID[p]="Nitna_WF".
++OsnovniDio(p), +dio_ID[p]="Ljuska_osovine_WF".
++OsnovniDio(p), +dio_ID[p]="Nosac_kotaca_zadnji_WF".
++OsnovniDio(p), +dio_ID[p]="Nosac_kotaca_prednji_WF".
++OsnovniDio(p), +dio_ID[p]="Bijela_boja_1dl_WF".
++OsnovniDio(p), +dio_ID[p]="Rucica_kocnice_WF".
++OsnovniDio(p), +dio_ID[p]="Gumirana_rucka_WF".
++OsnovniDio(p), +dio_ID[p]="Inox_cijev_15_WF".
++OsnovniDio(p), +dio_ID[p]="Obruc_WF".
++OsnovniDio(p), +dio_ID[p]="Celicna_cijev_20_WF".
++OsnovniDio(p), +dio_ID[p]="Zakovica_WF".
++OsnovniDio(p), +dio_ID[p]="Nipla_WF".
++OsnovniDio(p), +dio_ID[p]="Zica_WF".
++OsnovniDio(p), +dio_ID[p]="Lezaj_WF".
++OsnovniDio(p), +dio_ID[p]="Osovina_komplet_WF".
++OsnovniDio(p), +dio_ID[p]="Ljuska_glavcine_WF".
++OsnovniDio(p), +dio_ID[p]="Zica_WF".
+
++SklopiviDio(q), + dio_ID[q]="White_Falcon_100".
++SklopiviDio(q), + dio_ID[q]="Kotac_WF".
++SklopiviDio(q), + dio_ID[q]="Okvir_WF".
++SklopiviDio(q), + dio_ID[q]="Volan_WF".
++SklopiviDio(q), + dio_ID[q]="Felga_WF".
++SklopiviDio(q), + dio_ID[q]="Vilica_WF".
++SklopiviDio(q), + dio_ID[q]="Zbica_WF".
++SklopiviDio(q), + dio_ID[q]="Glavcina_WF".
+
++Dobavljac(s), +dobavljac_ID[s]="MR_Big_Sport-112".
++Dobavljac(s), +dobavljac_ID[s]="Dynamic-113".
++Dobavljac(s), +dobavljac_ID[s]="Keindl-114".
++Dobavljac(s), +dobavljac_ID[s]="DSG-115".
++Dobavljac(s), +dobavljac_ID[s]="Ciklo-116".
++Dobavljac(s), +dobavljac_ID[s]="BIZ-117".
++Dobavljac(s), +dobavljac_ID[s]="Bike_Sport-118".
++Dobavljac(s), +dobavljac_ID[s]="Huni-119".
++Dobavljac(s), +dobavljac_ID[s]="Rog_Joma-120".
+
++dobavljac_naziv[s]="Mr. Big Sport d.o.o" <- dobavljac_ID[s]="MR_Big_Sport-112".
++dobavljac_naziv[s]="Dynamic d.o.o" <- dobavljac_ID[s]="Dynamic-113".
++dobavljac_naziv[s]="Keindl market d.o.o" <- dobavljac_ID[s]="Keindl-114".
++dobavljac_naziv[s]="DSG d.o.o" <- dobavljac_ID[s]="DSG-115".
++dobavljac_naziv[s]="Ciklo sport d.o.o" <- dobavljac_ID[s]="Ciklo-116".
++dobavljac_naziv[s]="BIZ d.o.o" <- dobavljac_ID[s]="BIZ-117".
++dobavljac_naziv[s]="Bike sport forever d.o.o" <- dobavljac_ID[s]="Bike_Sport-118".
++dobavljac_naziv[s]="Huni d.o.o" <- dobavljac_ID[s]="Huni-119".
++dobavljac_naziv[s]="Rog Joma shop d.o.o" <- dobavljac_ID[s]="Rog_Joma-120".
+
++dobavljac_addresa[s]="Vukovarska 123, Zagreb" <- dobavljac_ID[s]="MR_Big_Sport-112".
++dobavljac_addresa[s]="Vlaska 13, Zagreb" <- dobavljac_ID[s]="Dynamic-113".
++dobavljac_addresa[s]="Vrbina 43, Karlovac" <- dobavljac_ID[s]="Keindl-114".
++dobavljac_addresa[s]="Radiceva 14, Split" <- dobavljac_ID[s]="DSG-115".
++dobavljac_addresa[s]="Vodovodna 32, Rijeka" <- dobavljac_ID[s]="Ciklo-116".
++dobavljac_addresa[s]="Skoprikova 60a Zagreb" <- dobavljac_ID[s]="BIZ-117".
++dobavljac_addresa[s]="Jukiceva 18, Osijek" <- dobavljac_ID[s]="Bike_Sport-118".
++dobavljac_addresa[s]="Osjecka 16, Zagreb" <- dobavljac_ID[s]="Huni-119".
++dobavljac_addresa[s]="Zvonimorova 34, Zagreb" <- dobavljac_ID[s]="Rog_Joma-120".
+
++Zaposlenik(z), +zaposlenik_ID[z]="100".
++Zaposlenik(z), +zaposlenik_ID[z]="101".
++Zaposlenik(z), +zaposlenik_ID[z]="102".
++Zaposlenik(z), +zaposlenik_ID[z]="103".
+
+
++zaposlenik_ime[e]="Petar" <- zaposlenik_ID[e]="100".
++zaposlenik_prezime[e]="Peric" <- zaposlenik_ID[e]="100".
++zaposlenik_nazivRadnogMjesta[e]="tehnicar-sastavljac" <-zaposlenik_ID[e]="100".
++zaposlenik_satnica[e]=70.00d <- zaposlenik_ID[e]="100".
+
++zaposlenik_ime[e]="Zoran" <- zaposlenik_ID[e]="101".
++zaposlenik_prezime[e]="Zoric" <- zaposlenik_ID[e]="101".
++zaposlenik_nazivRadnogMjesta[e]="visi tehnicar-sastavljac" <-zaposlenik_ID[e]="101".
++zaposlenik_satnica[e]=90.00d <- zaposlenik_ID[e]="101".
+
++zaposlenik_ime[e]="Marko" <- zaposlenik_ID[e]="102".
++zaposlenik_prezime[e]="Gorski" <- zaposlenik_ID[e]="102".
++zaposlenik_nazivRadnogMjesta[e]="varioc" <-zaposlenik_ID[e]="102".
++zaposlenik_satnica[e]=80.00d <- zaposlenik_ID[e]="102".
+
++zaposlenik_ime[e]="Igor" <- zaposlenik_ID[e]="103".
++zaposlenik_prezime[e]="Slaven" <- zaposlenik_ID[e]="103".
++zaposlenik_nazivRadnogMjesta[e]="tehnicar-sastavljac" <-zaposlenik_ID[e]="103".
++zaposlenik_satnica[e]=50.00d <- zaposlenik_ID[e]="103".
+
++sklopiviDio_vrijemeSastavljanja[e,p]=0.50d <- SklopiviDio(p), dio_ID[p]="White_Falcon_100", zaposlenik_ID[e]="100".
++sklopiviDio_vrijemeSastavljanja[e,p]=0.50d <- SklopiviDio(p),dio_ID[p]="Kotac_WF", zaposlenik_ID[e]="101".
++sklopiviDio_vrijemeSastavljanja[e,p]=1.00d <- SklopiviDio(p),dio_ID[p]="Okvir_WF", zaposlenik_ID[e]="102".
++sklopiviDio_vrijemeSastavljanja[e,p]=1.00d <- SklopiviDio(p),dio_ID[p]="Okvir_WF", zaposlenik_ID[e]="103".
++sklopiviDio_vrijemeSastavljanja[e,p]=0.50d <- SklopiviDio(p),dio_ID[p]="Volan_WF", zaposlenik_ID[e]="100".
++sklopiviDio_vrijemeSastavljanja[e,p]=0.50d <- SklopiviDio(p),dio_ID[p]="Felga_WF", zaposlenik_ID[e]="100".
++sklopiviDio_vrijemeSastavljanja[e,p]=0.50d <- SklopiviDio(p),dio_ID[p]="Vilica_WF", zaposlenik_ID[e]="101".
++sklopiviDio_vrijemeSastavljanja[e,p]=0.084d <- SklopiviDio(p),dio_ID[p]="Zbica_WF", zaposlenik_ID[e]="102".
++sklopiviDio_vrijemeSastavljanja[e,p]=0.17d <- SklopiviDio(p),dio_ID[p]="Glavcina_WF", zaposlenik_ID[e]="103".
+		  
++OdgovarajuciDio(od), +odgDio_ID[od]="Sajla_1".
++odgovarajuciDio_marka[od]="MS" <- odgDio_ID[od]="Sajla_1".
++odgovarajuciDio_spec[od]="Sajla za kocnicu, 1.5m" <- odgDio_ID[od]="Sajla_1".
++odgovarajuciDio_tezina[od]=100 <- odgDio_ID[od]="Sajla_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=30.00d <- dobavljac_ID[d]="MR_Big_Sport-112", odgDio_ID[od]="Sajla_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="MR_Big_Sport-112", odgDio_ID[od]="Sajla_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Sajla_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Sajla_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Sjedalo_1".
++odgovarajuciDio_marka[od]="Ventura" <- odgDio_ID[od]="Sjedalo_1".
++odgovarajuciDio_spec[od]="Sjedalo sa suspenzjama za gradski tip bicikla, 260 x 240" <- odgDio_ID[od]="Sjedalo_1".
++odgovarajuciDio_tezina[od]=600 <- odgDio_ID[od]="Sjedalo_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=100.00d <- dobavljac_ID[d]="MR_Big_Sport-112", odgDio_ID[od]="Sjedalo_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=2 <- dobavljac_ID[d]="MR_Big_Sport-112", odgDio_ID[od]="Sjedalo_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Sjedalo_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Sjedalo_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Sjedalo_2".
++odgovarajuciDio_marka[od]="Cube" <- odgDio_ID[od]="Sjedalo_2".
++odgovarajuciDio_spec[od]="Sjedalo za gradski tip ili trekking tip bicikla, 177 x 260" <- odgDio_ID[od]="Sjedalo_2".
++odgovarajuciDio_tezina[od]=500 <- odgDio_ID[od]="Sjedalo_2".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=220.00d <- dobavljac_ID[d]="Keindl-114", odgDio_ID[od]="Sjedalo_2".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Keindl-114", odgDio_ID[od]="Sjedalo_2".
++odgovarajuciDioZaOsnovniDio(od,osnDio)<- odgDio_ID[od]="Sjedalo_2", OsnovniDio(osnDio), dio_ID[osnDio]= "Sjedalo_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Kocnica_1".
++odgovarajuciDio_marka[od]="MS" <- odgDio_ID[od]="Kocnica_1".
++odgovarajuciDio_spec[od]="Kocnica V-brake, aluminij, dc-105, dp-70" <- odgDio_ID[od]="Kocnica_1".
++odgovarajuciDio_tezina[od]=200 <- odgDio_ID[od]="Kocnica_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=69.50d <- dobavljac_ID[d]="DSG-115", odgDio_ID[od]="Kocnica_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="DSG-115", odgDio_ID[od]="Kocnica_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Kocnica_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Kocnica_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Kocnica_2".
++odgovarajuciDio_marka[od]="Promax" <- odgDio_ID[od]="Kocnica_2".
++odgovarajuciDio_spec[od]="Kocnica V-brake, aluminij, 110mm" <- odgDio_ID[od]="Kocnica_2".
++odgovarajuciDio_tezina[od]=250 <- odgDio_ID[od]="Kocnica_2".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=80.00d <- dobavljac_ID[d]="Ciklo-116", odgDio_ID[od]="Kocnica_2".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Ciklo-116", odgDio_ID[od]="Kocnica_2".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Kocnica_2", OsnovniDio(osnDio), dio_ID[osnDio]= "Kocnica_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Maska_lanca_1".
++odgovarajuciDio_marka[od]="MS" <- odgDio_ID[od]="Maska_lanca_1".
++odgovarajuciDio_spec[od]="Maska za lanac i lancanik, 40cm" <- odgDio_ID[od]="Maska_lanca_1".
++odgovarajuciDio_tezina[od]=150 <- odgDio_ID[od]="Maska_lanca_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=50.00d <- dobavljac_ID[d]="Ciklo-116", odgDio_ID[od]="Maska_lanca_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Ciklo-116", odgDio_ID[od]="Maska_lanca_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Maska_lanca_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Maska_lanca".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Pedale_1".
++odgovarajuciDio_marka[od]="Cinelli" <- odgDio_ID[od]="Pedale_1".
++odgovarajuciDio_spec[od]="Pedale za gradski bicikl, crne" <- odgDio_ID[od]="Pedale_1".
++odgovarajuciDio_tezina[od]=700 <- odgDio_ID[od]="Pedale_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=59.00d <- dobavljac_ID[d]="Rog_Joma-120", odgDio_ID[od]="Pedale_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Rog_Joma-120", odgDio_ID[od]="Pedale_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Pedale_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Pedale_WF".		  
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Kurbla_1".
++odgovarajuciDio_marka[od]="MS" <- odgDio_ID[od]="Kurbla_1".
++odgovarajuciDio_spec[od]="Aluminijska kurbla 170mm" <- odgDio_ID[od]="Kurbla_1".
++odgovarajuciDio_tezina[od]=600 <- odgDio_ID[od]="Kurbla_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=60.00d <- dobavljac_ID[d]="Huni-119", odgDio_ID[od]="Kurbla_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Huni-119", odgDio_ID[od]="Kurbla_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Kurbla_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Kurbla_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Prednji_lancanik_1".
++odgovarajuciDio_marka[od]="FSA" <- odgDio_ID[od]="Prednji_lancanik_1".
++odgovarajuciDio_spec[od]="FSA Alloy K-FORCE 64X26T D10 WC068" <- odgDio_ID[od]="Prednji_lancanik_1".
++odgovarajuciDio_tezina[od]=200 <- odgDio_ID[od]="Prednji_lancanik_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=169.00d <- dobavljac_ID[d]="Huni-119", odgDio_ID[od]="Prednji_lancanik_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Huni-119", odgDio_ID[od]="Prednji_lancanik_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Prednji_lancanik_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Prednji_lancanik_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Lanac_1".
++odgovarajuciDio_marka[od]="KMC" <- odgDio_ID[od]="Lanac_1".
++odgovarajuciDio_spec[od]="Lanac za pogon, KMC-116 karika" <- odgDio_ID[od]="Lanac_1".
++odgovarajuciDio_tezina[od]=400 <- odgDio_ID[od]="Lanac_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=100.00d <- dobavljac_ID[d]="Bike_Sport-118", odgDio_ID[od]="Lanac_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Bike_Sport-118", odgDio_ID[od]="Lanac_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Lanac_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Lanac_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Blatobran_1".
++odgovarajuciDio_marka[od]="KMC" <- odgDio_ID[od]="Blatobran_1".
++odgovarajuciDio_spec[od]="Blatobran za gradski bicikl, aluminij" <- odgDio_ID[od]="Blatobran_1".
++odgovarajuciDio_tezina[od]=300 <- odgDio_ID[od]="Blatobran_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=70.00d <- dobavljac_ID[d]="Bike_Sport-118", odgDio_ID[od]="Blatobran_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Bike_Sport-118", odgDio_ID[od]="Blatobran_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Blatobran_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Blatobran".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Kazeta_1".
++odgovarajuciDio_marka[od]="Campagnolo" <- odgDio_ID[od]="Kazeta_1".
++odgovarajuciDio_spec[od]="Kazeta za graski bicikl, 1 brzina" <- odgDio_ID[od]="Kazeta_1".
++odgovarajuciDio_tezina[od]=300 <- odgDio_ID[od]="Kazeta_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=50.00d <- dobavljac_ID[d]="BIZ-117", odgDio_ID[od]="Kazeta_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="BIZ-117", odgDio_ID[od]="Kazeta_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Kazeta_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Kazeta_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Lula_volana_1".
++odgovarajuciDio_marka[od]="MS" <- odgDio_ID[od]="Lula_volana_1".
++odgovarajuciDio_spec[od]="Lula volana za bicikl, aluminij, prihvat volana 25.4mm" <- odgDio_ID[od]="Lula_volana_1".
++odgovarajuciDio_tezina[od]=160 <- odgDio_ID[od]="Lula_volana_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=150.00d <- dobavljac_ID[d]="BIZ-117", odgDio_ID[od]="Lula_volana_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="BIZ-117", odgDio_ID[od]="Lula_volana_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Lula_volana_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Lula_volana_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Zracnica_1".
++odgovarajuciDio_marka[od]="Verdstein" <- odgDio_ID[od]="Zracnica_1".
++odgovarajuciDio_spec[od]="Zracnica za trekking ili gradske bicikle, 28X1.5/8X1.3/8-1.60" <- odgDio_ID[od]="Zracnica_1".
++odgovarajuciDio_tezina[od]=250 <- odgDio_ID[od]="Zracnica_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=39.00d <- dobavljac_ID[d]="MR_Big_Sport-112", odgDio_ID[od]="Zracnica_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="MR_Big_Sport-112", odgDio_ID[od]="Zracnica_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Zracnica_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Zracnica_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Guma_1".
++odgovarajuciDio_marka[od]="Vittoria" <- odgDio_ID[od]="Guma_1".
++odgovarajuciDio_spec[od]="Vanjska guma za graski ili cestovni bicikl, 700x28c 28-622" <- odgDio_ID[od]="Guma_1".
++odgovarajuciDio_tezina[od]=400 <- odgDio_ID[od]="Guma_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=100.00d <- dobavljac_ID[d]="Ciklo-116", odgDio_ID[od]="Guma_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Ciklo-116", odgDio_ID[od]="Guma_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Guma_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Guma_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Ventil_1".
++odgovarajuciDio_marka[od]="MS" <- odgDio_ID[od]="Ventil_1".
++odgovarajuciDio_spec[od]="Ventil za zračnicu bicikla" <- odgDio_ID[od]="Ventil_1".
++odgovarajuciDio_tezina[od]=20 <- odgDio_ID[od]="Ventil_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=10.00d <- dobavljac_ID[d]="BIZ-117", odgDio_ID[od]="Ventil_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="BIZ-117", odgDio_ID[od]="Ventil_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio)<- odgDio_ID[od]="Ventil_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Ventil_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Alum_cijev_10_1".
++odgovarajuciDio_marka[od]="Cube" <- odgDio_ID[od]="Alum_cijev_10_1".
++odgovarajuciDio_spec[od]="Aluminijska cijev FI 1cm d=60cm" <- odgDio_ID[od]="Alum_cijev_10_1".
++odgovarajuciDio_tezina[od]=800 <- odgDio_ID[od]="Alum_cijev_10_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=120.00d <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Alum_cijev_10_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Alum_cijev_10_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Alum_cijev_10_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Alum_cijev_10_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Alum_cijev_25_1".
++odgovarajuciDio_marka[od]="Cube" <- odgDio_ID[od]="Alum_cijev_25_1".
++odgovarajuciDio_spec[od]="Aluminijska cijev FI 2.5cm d=100cm" <- odgDio_ID[od]="Alum_cijev_25_1".
++odgovarajuciDio_tezina[od]=1000 <- odgDio_ID[od]="Alum_cijev_25_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=180.00d <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Alum_cijev_25_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Alum_cijev_25_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Alum_cijev_25_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Alum_cijev_25_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Nitna_1".
++odgovarajuciDio_marka[od]="Cube" <- odgDio_ID[od]="Nitna_1".
++odgovarajuciDio_spec[od]="Nitna, spojni materijal" <- odgDio_ID[od]="Nitna_1".
++odgovarajuciDio_tezina[od]=50 <- odgDio_ID[od]="Nitna_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=5.00d <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Nitna_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Nitna_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Nitna_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Nitna_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Ljuska_osovine_1".
++odgovarajuciDio_marka[od]="Cube" <- odgDio_ID[od]="Ljuska_osovine_1".
++odgovarajuciDio_spec[od]="Ljuska osovine pogona" <- odgDio_ID[od]="Ljuska_osovine_1".
++odgovarajuciDio_tezina[od]=60 <- odgDio_ID[od]="Ljuska_osovine_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=40.00d <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Ljuska_osovine_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Ljuska_osovine_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Ljuska_osovine_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Ljuska_osovine_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Nosac_kotaca_zadnji_1".
++odgovarajuciDio_marka[od]="Araya" <- odgDio_ID[od]="Nosac_kotaca_zadnji_1".
++odgovarajuciDio_spec[od]="Nosač zadnjeg kotaca" <- odgDio_ID[od]="Nosac_kotaca_zadnji_1".
++odgovarajuciDio_tezina[od]=80 <- odgDio_ID[od]="Nosac_kotaca_zadnji_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=20.00d <- dobavljac_ID[d]="Rog_Joma-120", odgDio_ID[od]="Nosac_kotaca_zadnji_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Rog_Joma-120", odgDio_ID[od]="Nosac_kotaca_zadnji_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Nosac_kotaca_zadnji_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Nosac_kotaca_zadnji_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Bijela_boja_1dl_1".
++odgovarajuciDio_marka[od]="Chromos" <- odgDio_ID[od]="Bijela_boja_1dl_1".
++odgovarajuciDio_spec[od]="Bijela boja za metalne povrsine Chromos, 1dl" <- odgDio_ID[od]="Bijela_boja_1dl_1".
++odgovarajuciDio_tezina[od]=100 <- odgDio_ID[od]="Bijela_boja_1dl_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=30.00d <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Bijela_boja_1dl_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Bijela_boja_1dl_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Bijela_boja_1dl_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Bijela_boja_1dl_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Gumirana_rucka_1".
++odgovarajuciDio_marka[od]="Cinelli" <- odgDio_ID[od]="Gumirana_rucka_1".
++odgovarajuciDio_spec[od]="Gumirana rucka (grip) za volan" <- odgDio_ID[od]="Gumirana_rucka_1".
++odgovarajuciDio_tezina[od]=100 <- odgDio_ID[od]="Gumirana_rucka_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=15.00d <- dobavljac_ID[d]="DSG-115", odgDio_ID[od]="Gumirana_rucka_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="DSG-115", odgDio_ID[od]="Gumirana_rucka_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Gumirana_rucka_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Gumirana_rucka_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Rucica_kocnice_1".
++odgovarajuciDio_marka[od]="MS" <- odgDio_ID[od]="Rucica_kocnice_1".
++odgovarajuciDio_spec[od]="Rucica kocnice" <- odgDio_ID[od]="Rucica_kocnice_1".
++odgovarajuciDio_tezina[od]=150 <- odgDio_ID[od]="Rucica_kocnice_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=40.00d <- dobavljac_ID[d]="DSG-115", odgDio_ID[od]="Rucica_kocnice_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="DSG-115", odgDio_ID[od]="Rucica_kocnice_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Rucica_kocnice_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Rucica_kocnice_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Inox_cijev_15_1".
++odgovarajuciDio_marka[od]="Cube" <- odgDio_ID[od]="Inox_cijev_15_1".
++odgovarajuciDio_spec[od]="Inox cijev volana FI 1.5cm, d=50cm" <- odgDio_ID[od]="Inox_cijev_15_1".
++odgovarajuciDio_tezina[od]=700 <- odgDio_ID[od]="Inox_cijev_15_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=250.00d <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Inox_cijev_15_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Inox_cijev_15_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Inox_cijev_15_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Inox_cijev_15_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Obruc_1".
++odgovarajuciDio_marka[od]="MS" <- odgDio_ID[od]="Obruc_1".
++odgovarajuciDio_spec[od]="Obruc koraca, 28 inch" <- odgDio_ID[od]="Obruc_1".
++odgovarajuciDio_tezina[od]=450 <- odgDio_ID[od]="Obruc_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=70.00d <- dobavljac_ID[d]="DSG-115", odgDio_ID[od]="Obruc_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="DSG-115", odgDio_ID[od]="Obruc_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Obruc_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Obruc_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Nosac_kotaca_prednji_1".
++odgovarajuciDio_marka[od]="Araya" <- odgDio_ID[od]="Nosac_kotaca_prednji_1".
++odgovarajuciDio_spec[od]="Nosač prednjeg kotaca" <- odgDio_ID[od]="Nosac_kotaca_prednji_1".
++odgovarajuciDio_tezina[od]=80 <- odgDio_ID[od]="Nosac_kotaca_prednji_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=15.00d <- dobavljac_ID[d]="Rog_Joma-120", odgDio_ID[od]="Nosac_kotaca_prednji_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Rog_Joma-120", odgDio_ID[od]="Nosac_kotaca_prednji_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Nosac_kotaca_prednji_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Nosac_kotaca_prednji_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Celicna_cijev_20_1".
++odgovarajuciDio_marka[od]="Shimano" <- odgDio_ID[od]="Celicna_cijev_20_1".
++odgovarajuciDio_spec[od]="Celicna cijev vilice-steerer FI 2cm, d=50cm" <- odgDio_ID[od]="Celicna_cijev_20_1".
++odgovarajuciDio_tezina[od]=1500 <- odgDio_ID[od]="Celicna_cijev_20_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=100.00d <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Celicna_cijev_20_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Celicna_cijev_20_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Celicna_cijev_20_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Celicna_cijev_20_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Zakovica_1".
++odgovarajuciDio_marka[od]="MS" <- odgDio_ID[od]="Zakovica_1".
++odgovarajuciDio_spec[od]="Zakovica za zbicu" <- odgDio_ID[od]="Zakovica_1".
++odgovarajuciDio_tezina[od]=10 <- odgDio_ID[od]="Zakovica_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=2.00d <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Zakovica_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Zakovica_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Zakovica_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Zakovica_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Nipla_1".
++odgovarajuciDio_marka[od]="MS" <- odgDio_ID[od]="Nipla_1".
++odgovarajuciDio_spec[od]="Nipla za zbicu" <- odgDio_ID[od]="Nipla_1".
++odgovarajuciDio_tezina[od]=10 <- odgDio_ID[od]="Nipla_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=3.00d <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Nipla_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Nipla_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Nipla_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Nipla_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Zica_1".
++odgovarajuciDio_marka[od]="MS" <- odgDio_ID[od]="Zica_1".
++odgovarajuciDio_spec[od]="Zica zbice, 2X284 AERO 424" <- odgDio_ID[od]="Zica_1".
++odgovarajuciDio_tezina[od]=20 <- odgDio_ID[od]="Zica_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=3.00d <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Zica_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Zica_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Zica_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Zica_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Lezaj_1".
++odgovarajuciDio_marka[od]="Cube" <- odgDio_ID[od]="Lezaj_1".
++odgovarajuciDio_spec[od]="Kuglicni lezaj za glavcinu kotaca" <- odgDio_ID[od]="Lezaj_1".
++odgovarajuciDio_tezina[od]=100 <- odgDio_ID[od]="Lezaj_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=15.00d <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Lezaj_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Lezaj_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Lezaj_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Lezaj_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Osovina_komplet_1".
++odgovarajuciDio_marka[od]="Cube" <- odgDio_ID[od]="Osovina_komplet_1".
++odgovarajuciDio_spec[od]="Komplet osovina za glavcinu d=10cm" <- odgDio_ID[od]="Osovina_komplet_1".
++odgovarajuciDio_tezina[od]=50 <- odgDio_ID[od]="Osovina_komplet_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=5.00d <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Osovina_komplet_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Osovina_komplet_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Osovina_komplet_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Osovina_komplet_WF".
+
++OdgovarajuciDio(od), +odgDio_ID[od]="Ljuska_glavcine_1".
++odgovarajuciDio_marka[od]="Cube" <- odgDio_ID[od]="Ljuska_glavcine_1".
++odgovarajuciDio_spec[od]="Ljuska glavcine" <- odgDio_ID[od]="Ljuska_glavcine_1".
++odgovarajuciDio_tezina[od]=100 <- odgDio_ID[od]="Ljuska_glavcine_1".
++odgovarajuciDioKodDobavljaca_cijena[d,od]=15.00d <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Ljuska_glavcine_1".
++odgovarajuciDioKodDobavljaca_vrijemeIsporuke[d,od]=1 <- dobavljac_ID[d]="Dynamic-113", odgDio_ID[od]="Ljuska_glavcine_1".
++odgovarajuciDioZaOsnovniDio(od,osnDio) <- odgDio_ID[od]="Ljuska_glavcine_1", OsnovniDio(osnDio), dio_ID[osnDio]= "Ljuska_glavcine_WF".
+
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Zbica_WF", dio_ID[p2]="Zakovica_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Zbica_WF", dio_ID[p2]="Nipla_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Zbica_WF", dio_ID[p2]="Zica_WF".
+
++direktnoSadrzi[p1,p2]=2 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Glavcina_WF", dio_ID[p2]="Lezaj_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Glavcina_WF", dio_ID[p2]="Osovina_komplet_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Glavcina_WF", dio_ID[p2]="Ljuska_glavcine_WF".
+
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Felga_WF", dio_ID[p2]="Obruc_WF".
++direktnoSadrzi[p1,p2]=32 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Felga_WF", dio_ID[p2]="Zbica_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Felga_WF", dio_ID[p2]="Glavcina_WF".
+
++direktnoSadrzi[p1,p2]=2 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Vilica_WF", dio_ID[p2]="Alum_cijev_10_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Vilica_WF", dio_ID[p2]="Celicna_cijev_20_WF".
++direktnoSadrzi[p1,p2]=2 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Vilica_WF", dio_ID[p2]="Nosac_kotaca_prednji_WF".
+
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Kotac_WF", dio_ID[p2]="Zracnica_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Kotac_WF", dio_ID[p2]="Guma_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Kotac_WF", dio_ID[p2]="Felga_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Kotac_WF", dio_ID[p2]="Ventil_WF".
+
++direktnoSadrzi[p1,p2]=2 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Volan_WF", dio_ID[p2]="Gumirana_rucka_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Volan_WF", dio_ID[p2]="Rucica_kocnice_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Volan_WF", dio_ID[p2]="Inox_cijev_15_WF".
+
+
++direktnoSadrzi[p1,p2]=4 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Okvir_WF", dio_ID[p2]="Alum_cijev_10_WF".
++direktnoSadrzi[p1,p2]=3 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Okvir_WF", dio_ID[p2]="Alum_cijev_25_WF".
++direktnoSadrzi[p1,p2]=6 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Okvir_WF", dio_ID[p2]="Nitna_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Okvir_WF", dio_ID[p2]="Ljuska_osovine_WF".
++direktnoSadrzi[p1,p2]=2 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Okvir_WF", dio_ID[p2]="Nosac_kotaca_zadnji_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Okvir_WF", dio_ID[p2]="Bijela_boja_1dl_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="Okvir_WF", dio_ID[p2]="Vilica_WF".
+
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="White_Falcon_100", dio_ID[p2]="Sajla_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="White_Falcon_100", dio_ID[p2]="Sjedalo_WF".
++direktnoSadrzi[p1,p2]=2 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="White_Falcon_100", dio_ID[p2]="Kotac_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="White_Falcon_100", dio_ID[p2]="Kocnica_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="White_Falcon_100", dio_ID[p2]="Maska_lanca".
++direktnoSadrzi[p1,p2]=2 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="White_Falcon_100", dio_ID[p2]="Pedale_WF".
++direktnoSadrzi[p1,p2]=2 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="White_Falcon_100", dio_ID[p2]="Kurbla_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="White_Falcon_100", dio_ID[p2]="Okvir_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="White_Falcon_100", dio_ID[p2]="Prednji_lancanik_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="White_Falcon_100", dio_ID[p2]="Lanac_WF".
++direktnoSadrzi[p1,p2]=2 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="White_Falcon_100", dio_ID[p2]="Blatobran".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="White_Falcon_100", dio_ID[p2]="Kazeta_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="White_Falcon_100", dio_ID[p2]="Lula_volana_WF".
++direktnoSadrzi[p1,p2]=1 <- SklopiviDio(p1), Dio(p2), dio_ID[p1]="White_Falcon_100", dio_ID[p2]="Volan_WF".
+
+'
+
+
+//Razni upiti nad bazom podataka
+// Nakon što smo dodali podatke u bazu možemo copy-paste u isti REPL jedan po jedan upit, pritisnuti tipku ENTER te vidjeti same rezultate upita u tablicama.
+
+//Ispisuje sve poddijelove (direktne i indirektne) bicikla "White_Falcon_100" koristeći rekurzivno pravilo "sviPoddijelovi".  
+query '_(s, "White_Falcon_100", p, kol)<- sviPoddijelovi[s,d,pd]=kol, dio_ID[d]="White_Falcon_100", dio_ID[pd]=p.'
+
+//Ispisuje koji sve sklopivi dijelovi i u kojoj količine sadrže osnovni dio "Alum_cijev_10_WF".
+query '_(s,"Alum_cijev_10_WF",qnt)<-sklopiviKojiSadrzeDijelove[dd,pp]=qnt, dio_ID[dd]=s, dio_ID[pp]="Alum_cijev_10_WF".'
+
+//Ispisuje najjeftinije osnovne dijelove (odnosno njihove odgovarajuće dijelove sa najjeftinijim cijenama kod dobavljača).
+query '_("White_Falcon_100",od,dbv,c)<-najjeftinijiOsnDijeloviNekogDijela[d,dob,osnDio,_]=cij, dio_ID[d]="White_Falcon_100",dobavljac_ID[dob]=dbv ,dio_ID[osnDio]=od, c=decimal:string:convert[cij].'
+
+//Ispisuje najjeftiije kumulativne osnovne cijene sastava bicikla grupirane po osnovnim dijelovima. (Dakle, ukoliko bicikl ima 64 žbice tada će cijena najjeftinije žbice biti pomnožena sa 64). 
+query '_("White_Falcon_100", od, c)<-  najjeftOsnCijeneSastavaKumulGrupirano[d,osnDio]=cij,  dio_ID[d]="White_Falcon_100", dio_ID[osnDio]=od, c=decimal:string:convert[cij].'
+
+//Ispisuje ukupne cijene sastavljanja sklpivih dijelova za bicikl.
+query '_(put,"White_Falcon_100",sklop_d,c)<-cijenaSastavljanjaSaNajjeftDijelovima[put, dio, dijelovi]=cijene, SklopiviDio(dijelovi), dio_ID[dio]="White_Falcon_100", dio_ID[dijelovi]=sklop_d, c=decimal:string:convert[cijene].'
+
+//Ispisuje cijenu proizvodnje bicikla "White_Falcon_100" uzveši u obzir najjeftinije odgovarajuće djelove za osnovne dijelove koje možemo nabaviti kod dobavljača.
+query '_("White_Falcon_100",c)<- cijenaProizvodnje[d]=cj, dio_ID[d]="White_Falcon_100", c=decimal:string:convert[cj].'
+
+
+
+query '_("White_Falcon_100",osnDio1, om,os,ot, dn, da, kvant1)<-kolikoNarucitiSkupa[dio,osnDio,d,odgDio]=kvant1, dio_ID[dio]="White_Falcon_100", dio_ID[osnDio]=osnDio1, odgovarajuciDio_marka[odgDio]=om, odgovarajuciDio_tezina[odgDio]=ot, odgovarajuciDio_spec[odgDio]=os, dobavljac_addresa[d]=da, dobavljac_naziv[d]=dn.'
+
+query '_(dani)<-vrijemeDoPocetkaProizvodnje[dio]=dani, dio_ID[dio]="White_Falcon_100".'
